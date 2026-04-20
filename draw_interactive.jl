@@ -22,6 +22,7 @@ using Statistics
 using Distributions
 using Plots
 using PlutoUI
+using LaTeXStrings
 
 
 function poisson_pmf(k::Int, λ::Float64)
@@ -75,11 +76,11 @@ end
 
 struct State
     period::Int
-    inventory::Float64
+    start_inventory::Float64
 end
 
-Base.:(==)(a::State, b::State) = a.period == b.period && a.inventory == b.inventory
-Base.hash(s::State, h::UInt) = hash((s.period, s.inventory), h)
+Base.:(==)(a::State, b::State) = a.period == b.period && a.start_inventory == b.start_inventory
+Base.hash(s::State, h::UInt) = hash((s.period, s.start_inventory), h)
 
 # --------------------------
 # Newsvendor DP
@@ -106,16 +107,29 @@ function feasible_actions(model::NewsvendorDP)
 end
 
 function transition(model::NewsvendorDP, s::State, a, d)
-    nextI = s.inventory + a - d
-    nextI = clamp(nextI, model.min_I, model.max_I)
+	if s.period > 1
+    	nextI = s.start_inventory + a - d
+	else
+		nextI = s.start_inventory - d
+	end
+    # nextI = clamp(nextI, model.min_I, model.max_I)
     return State(s.period + 1, nextI)
 end
 
 function immediate_cost(model::NewsvendorDP, s::State, a, d)
-    fix = a > 0 ? model.fix_cost : 0.0
-    vari = a * model.var_cost
+    if s.period > 1
+        fix = a > 0 ? model.fix_cost : 0.0
+        vari = a * model.var_cost
 
-    nextI = clamp(s.inventory + a - d, model.min_I, model.max_I)
+        # nextI = clamp(s.start_inventory + a - d, model.min_I, model.max_I)
+		nextI = s.start_inventory + a - d
+    else
+        fix = 0.0
+        vari = s.start_inventory * model.var_cost
+
+        # nextI = clamp(s.start_inventory - d, model.min_I, model.max_I)
+		nextI = s.start_inventory - d
+    end
 
     hold = max(model.hold_cost * nextI, 0.0)
     penalty = max(-model.penalty_cost * nextI, 0.0)
@@ -158,25 +172,28 @@ end
 
 # ╔═╡ 644d7636-eebc-4b7f-a8c8-6da56d1cb3d5
 begin
-	T = 20
-	mean_demand = 40.0
-	demands = fill(mean_demand, T)
+	# T = 10
+	# mean_demand = 40.0
+	# demands = fill(mean_demand, T)
+
+	demands = [10.0, 60.0, 20.0]
+	T = length(demands)
 	
 	stepSize = 1.0
-	fix_cost = 0.0
-	var_cost = 1.0
+	fix_cost = 500.0
+	var_cost = 0.0
 	hold_cost = 2.0
-	penalty_cost = 10.0
+	penalty_cost = 20.0
 	
 	trunc_q = 0.9999
-	maxI = 100.0
+	maxI = 200.0
 	minI = -100.0
 	
 	pmf = get_pmf_poisson(demands, trunc_q)
 end
 
 # ╔═╡ 59afef70-00bc-4642-b12a-34bc68597e85
-function solve_model(capacity)
+function compute_G(capacity)
 	model = NewsvendorDP(
 	        T, capacity, stepSize,
 	        fix_cost, var_cost,
@@ -184,39 +201,43 @@ function solve_model(capacity)
 	        maxI, minI, pmf,
 	        Dict(), Dict()
 	)
+
 	
-	s0 = State(1, 0.0)
-	return recursion(model, s0)
+	I_grid = -100:1:200
+	G = Vector{Float64}(undef, length(I_grid))
+
+	for (idx, i) in enumerate(I_grid)
+		s0 = State(1, i)
+		G[idx] = recursion(model, s0)
+	end
+	return I_grid, G
 end
 
-# ╔═╡ 0f21eb15-df0e-412d-9cbc-952a1ccc3a34
+# ╔═╡ 86ec7171-f67f-4479-9ec9-e4d1747047d6
+# 这种方式可以让用户点击数值后直接输入，或左右微调
+@bind capacity Slider(10:200, default=100, show_value=true)
 
-
-# ╔═╡ 2dc38fb1-ea93-424c-a291-e225aacd1c5b
-@bind cap Slider(10:1:200, default=100, show_value=true)
-
-# ╔═╡ cd212f2a-7c70-4ec0-b650-8a240cef5c71
-cost = solve_model(cap)
-
-# ╔═╡ 74c5985f-7ea6-47a0-abb6-fa655a8524fe
-# todo
-plot([cap], [cost],
-	     seriestype = :scatter,
-	     title = "Cost vs Capacity (interactive)",
-	     xlabel = "Capacity",
-	     ylabel = "Cost",
-	     label = "current")
+# ╔═╡ 4b9932d8-cb41-42b7-9944-6529028ee252
+begin
+	I, G = compute_G(capacity)
+	plot(I, G,
+		xlabel = "Inventory",
+		label = L"G(y)",
+		lw = 2)
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Distributions = "~0.25.124"
+LaTeXStrings = "~1.4.0"
 Plots = "~1.41.6"
 PlutoUI = "~0.7.78"
 """
@@ -225,9 +246,9 @@ PlutoUI = "~0.7.78"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.6"
+julia_version = "1.12.3"
 manifest_format = "2.0"
-project_hash = "48fe8be5b5cb8cde06a2d426b8fa274cbfb6e106"
+project_hash = "954d5784f4fa2a8946898509ebb4ef7438097ad8"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -774,7 +795,7 @@ version = "1.11.0"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
-version = "2025.11.4"
+version = "2025.5.20"
 
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
@@ -1493,9 +1514,7 @@ version = "1.13.0+0"
 # ╠═e6b5bbbf-da7d-4428-815d-636336625518
 # ╠═644d7636-eebc-4b7f-a8c8-6da56d1cb3d5
 # ╠═59afef70-00bc-4642-b12a-34bc68597e85
-# ╠═0f21eb15-df0e-412d-9cbc-952a1ccc3a34
-# ╠═2dc38fb1-ea93-424c-a291-e225aacd1c5b
-# ╠═cd212f2a-7c70-4ec0-b650-8a240cef5c71
-# ╠═74c5985f-7ea6-47a0-abb6-fa655a8524fe
+# ╠═86ec7171-f67f-4479-9ec9-e4d1747047d6
+# ╠═4b9932d8-cb41-42b7-9944-6529028ee252
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
