@@ -1,3 +1,5 @@
+# 20 periods, 3.83s on the windows PC
+
 # 定义一个模块，并对外暴露接口
 module Newsvendor
 export NewsvendorDP, recursion, get_pmf_poisson, State
