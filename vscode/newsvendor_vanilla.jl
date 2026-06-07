@@ -1,37 +1,40 @@
-# 20 periods, 3.83s on the windows PC
+# using dict
+# 20 periods, 0.31s on the windows PC;
+# 40 periods, 0.75s on Dell windows;
 
 # 定义一个模块，并对外暴露接口
-module Newsvendor
-export NewsvendorDP, recursion, get_pmf_poisson, State
+# module 是用来将大型程序打包，被其他程序调用的
+# module Newsvendor
+# export NewsvendorDP, recursion, get_pmf_poisson, State
 
 # using SpecialFunctions   # lgamma
 using Statistics
 using Distributions
 
 
-function poisson_pmf(k::Int, λ::Float64)
-    if k < 0 || λ < 0
-        return 0.0
-    elseif k == 0 && λ == 0
-        return 1.0
-    end
-    logp = -λ + k * log(λ) - lgmma(k + 1)
-    return exp(logp)
-end
+# function poisson_pmf(k::Int, λ::Float64)
+#     if k < 0 || λ < 0
+#         return 0.0
+#     elseif k == 0 && λ == 0
+#         return 1.0
+#     end
+#     logp = -λ + k * log(λ) - lgamma(k + 1)
+#     return exp(logp)
+# end
 
-function poisson_quantile(p::Float64, λ::Float64)
-    low = 0
-    high = max(100, Int(3λ))
-    while low < high
-        mid = (low + high) ÷ 2
-        if cdf(Poisson(λ), mid) < p
-            low = mid + 1
-        else
-            high = mid
-        end
-    end
-    return low
-end
+# function poisson_quantile(p::Float64, λ::Float64)
+#     low = 0
+#     high = max(100, Int(3λ))
+#     while low < high
+#         mid = (low + high) ÷ 2
+#         if cdf(Poisson(λ), mid) < p
+#             low = mid + 1
+#         else
+#             high = mid
+#         end
+#     end
+#     return low
+# end
 
 # --------------------------
 # PMF truncation
@@ -42,8 +45,11 @@ function get_pmf_poisson(demands::Vector{Float64}, q::Float64)
     pmf = Vector{Vector{Tuple{Int, Float64}}}(undef, T)
 
     for t in 1:T
-        ub = poisson_quantile(q, demands[t])
-        lb = poisson_quantile(1 - q, demands[t])
+        # ub = poisson_quantile(q, demands[t])
+        # lb = poisson_quantile(1 - q, demands[t])
+
+        ub = quantile(Poisson(demands[t]), q)
+        lb = quantile(Poisson(demands[t]), 1 - q)
 
         support = [(d, pdf(Poisson(demands[t]), d) / (2q - 1))
                    for d in lb:ub]
@@ -70,6 +76,7 @@ Base.hash(s::State, h::UInt) = hash((s.period, s.inventory), h)
 # Newsvendor DP
 # --------------------------
 # mutable 表示这个结构体的字段是可以被修改的
+# julia 没有专门的 class，但可以为 struct 定义属于它的函数
 mutable struct NewsvendorDP
     T::Int
     capacity::Float64
@@ -123,8 +130,8 @@ function recursion(model::NewsvendorDP, s::State)
             val += p * immediate_cost(model, s, a, d)
 
             if s.period < model.T
-                ns = transition(model, s, a, d)
-                val += p * recursion(model, ns)
+                next_state = transition(model, s, a, d)
+                val += p * recursion(model, next_state)
             end
         end
 
@@ -146,7 +153,7 @@ end
 
 function main()
     T = 20
-    mean_demand = 40.0
+    mean_demand = 20.0
     demands = fill(mean_demand, T)
 
     capacity = 150.0
@@ -174,13 +181,15 @@ function main()
 
     t0 = time()
     val = recursion(model, s0)
+    best_q = model.cache_actions[s0];
     t1 = time()
 
     println("planning horizon = $T")
     println("runtime = $(t1 - t0) sec")
     println("optimal value = $val")
+    println("optimal Q at period 1 = $best_q")
 end
 
 
 main()
-end
+# end # module end

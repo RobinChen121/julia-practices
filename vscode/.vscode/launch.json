@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "julia",
+            "request": "launch",
+            "name": "Debug active Julia file (Interpreted)",
+            "program": "${file}",
+            "stopOnEntry": false,
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "juliaEnv": "${command:activeJuliaEnvironment}",
+            // 🌟 核心新增配置 1：强制开启调试编译选项
+            "internalConsoleOptions": "neverOpen",
+            // 🌟 核心新增配置 2：控制 Julia 调试器的编译行为
+            "args": ["--compiled-modules=no"] 
+        }
+    ]
+}

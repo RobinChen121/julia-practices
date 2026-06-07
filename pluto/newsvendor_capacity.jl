@@ -17,227 +17,253 @@ macro bind(def, element)
 end
 
 # ╔═╡ e6b5bbbf-da7d-4428-815d-636336625518
+# for slider, it is better to use Pluto
+
 begin
-using Statistics
-using Distributions
-using Plots
-using PlutoUI
-using LaTeXStrings
+	# using 2D vector in DP;
+	# Julia's matrix computation is already very faster;
+	# flattern matrix can't not be faster.
+	# 20 periods, 0.026s on the windows PC;
+	# 40 periods, 0.048s on Dell windows;
+	
+	using Distributions
+	
+	##########################
+	# global parameters
+	# 全局变量会影响计算速度，使用 const 才能消除对计算速度的影响
+	const T = 4
+	
+	# const mean_demand = 20.0
+	# const demands = fill(mean_demand, T)
 
+	# self defined distribution
+	const values = collect(10:10:100)
+	const probs = fill(0.1, 10)
 
-function poisson_pmf(k::Int, λ::Float64)
-    if k < 0 || λ < 0
-        return 0.0
-    elseif k == 0 && λ == 0
-        return 1.0
-    end
-    logp = -λ + k * log(λ) - lgmma(k + 1)
-    return exp(logp)
-end
-
-function poisson_quantile(p::Float64, λ::Float64)
-    low = 0
-    high = max(100, Int(3λ))
-    while low < high
-        mid = (low + high) ÷ 2
-        if cdf(Poisson(λ), mid) < p
-            low = mid + 1
-        else
-            high = mid
-        end
-    end
-    return low
-end
-
-# --------------------------
-# PMF truncation
-# --------------------------
-
-function get_pmf_poisson(demands::Vector{Float64}, q::Float64)
-    T = length(demands)
-    pmf = Vector{Vector{Tuple{Int, Float64}}}(undef, T)
-
-    for t in 1:T
-        ub = poisson_quantile(q, demands[t])
-        lb = poisson_quantile(1 - q, demands[t])
-
-        support = [(d, pdf(Poisson(demands[t]), d) / (2q - 1))
-                   for d in lb:ub]
-
-        pmf[t] = support
-    end
-
-    return pmf
-end
-
-# --------------------------
-# State
-# --------------------------
-
-struct State
-    period::Int
-    start_inventory::Float64
-end
-
-Base.:(==)(a::State, b::State) = a.period == b.period && a.start_inventory == b.start_inventory
-Base.hash(s::State, h::UInt) = hash((s.period, s.start_inventory), h)
-
-# --------------------------
-# Newsvendor DP
-# --------------------------
-# mutable 表示这个结构体的字段是可以被修改的
-mutable struct NewsvendorDP
-    T::Int
-    capacity::Float64
-    stepSize::Float64
-    fix_cost::Float64
-    var_cost::Float64
-    hold_cost::Float64
-    penalty_cost::Float64
-    max_I::Float64
-    min_I::Float64
-    pmf::Vector{Vector{Tuple{Int, Float64}}}
-    cache_actions::Dict{State, Float64}
-    cache_values::Dict{State, Float64}
-end
-
-function feasible_actions(model::NewsvendorDP)
-    Q = Int(model.capacity / model.stepSize)
-    return [i * model.stepSize for i in 0:Q-1]
-end
-
-function transition(model::NewsvendorDP, s::State, a, d)
-	if s.period > 1
-    	nextI = s.start_inventory + a - d
-	else
-		nextI = s.start_inventory - d
+	const unit_order_cost = 0.0
+	const hold_cost = 2.0
+	const penalty_cost = 10.0
+	
+	const truncQuantile = 1 # 0.9999
+	const minI = -100
+	const maxI = 200
+	const num_inv = maxI - minI + 1
+	################################
+	
+	struct DemandProb
+		demand::Int
+		prob::Float64
 	end
-    # nextI = clamp(nextI, model.min_I, model.max_I)
-    return State(s.period + 1, nextI)
-end
-
-function immediate_cost(model::NewsvendorDP, s::State, a, d)
-    if s.period > 1
-        fix = a > 0 ? model.fix_cost : 0.0
-        vari = a * model.var_cost
-
-        # nextI = clamp(s.start_inventory + a - d, model.min_I, model.max_I)
-		nextI = s.start_inventory + a - d
-    else
-        fix = 0.0
-        vari = s.start_inventory * model.var_cost
-
-        # nextI = clamp(s.start_inventory - d, model.min_I, model.max_I)
-		nextI = s.start_inventory - d
-    end
-
-    hold = max(model.hold_cost * nextI, 0.0)
-    penalty = max(-model.penalty_cost * nextI, 0.0)
-
-    return fix + vari + hold + penalty
-end
-
-function recursion(model::NewsvendorDP, s::State)
-    if haskey(model.cache_values, s)
-        return model.cache_values[s]
-    end
-
-    best_val = Inf
-    best_q = 0.0
-
-    for a in feasible_actions(model)
-        val = 0.0
-
-        for (d, p) in model.pmf[s.period]
-            val += p * immediate_cost(model, s, a, d)
-
-            if s.period < model.T
-                ns = transition(model, s, a, d)
-                val += p * recursion(model, ns)
-            end
-        end
-
-        if val < best_val
-            best_val = val
-            best_q = a
-        end
-    end
-
-    model.cache_actions[s] = best_q
-    model.cache_values[s] = best_val
-
-    return best_val
-end
-end
-
-# ╔═╡ 644d7636-eebc-4b7f-a8c8-6da56d1cb3d5
-begin
-	# T = 10
-	# mean_demand = 40.0
-	# demands = fill(mean_demand, T)
-
-	demands = [10.0, 60.0, 20.0]
-	T = length(demands)
 	
-	stepSize = 1.0
-	fix_cost = 500.0
-	var_cost = 0.0
-	hold_cost = 2.0
-	penalty_cost = 20.0
-	
-	trunc_q = 0.9999
-	maxI = 200.0
-	minI = -100.0
-	
-	pmf = get_pmf_poisson(demands, trunc_q)
-end
-
-# ╔═╡ 59afef70-00bc-4642-b12a-34bc68597e85
-function compute_G(capacity)
-	model = NewsvendorDP(
-	        T, capacity, stepSize,
-	        fix_cost, var_cost,
-	        hold_cost, penalty_cost,
-	        maxI, minI, pmf,
-	        Dict(), Dict()
+	function getPMFPoisson(
+		demands::Vector{Float64},
+		truncated_quantile::Float64,
 	)
-
+		T = length(demands)
 	
-	I_grid = -100:1:200
-	G = Vector{Float64}(undef, length(I_grid))
+		support_lb = Vector{Int}(undef, T)
+		support_ub = Vector{Int}(undef, T)
 
-	for (idx, i) in enumerate(I_grid)
-		s0 = State(1, i)
-		G[idx] = recursion(model, s0)
+		pmf = Vector{Vector{DemandProb}}(undef, T)
+		
+		for t in 1:T
+			# dist = Poisson(demands[t]) 
+			dist = DiscreteNonParametric(values, probs)
+			support_lb[t] = quantile(dist, 1 - truncated_quantile)
+			support_ub[t] = quantile(dist, truncated_quantile)
+
+			len = support_ub[t] - support_lb[t] + 1
+			pmf[t] = Vector{DemandProb}(undef, len)
+	
+			for j in 1:len
+				demand = support_lb[t] + j - 1
+				pmf[t][j] = DemandProb(
+					demand,
+					pdf(dist, demand) / (2 * truncated_quantile - 1),
+				)
+			end
+		end
+		return pmf
 	end
-	return I_grid, G
+
+	function getPMFSelf(
+		values::Vector{Int},
+		probs::Vector{Float64},
+	)
+		len = length(values)
+	    pmf = Vector{Vector{DemandProb}}(undef, T)
+	    for t in 1:T
+	        pmf[t] = Vector{DemandProb}(undef, len)
+			for j in 1:len
+				pmf[t][j] = DemandProb(
+					values[j],
+					probs[j]
+				)
+			end
+		end
+		return pmf
+	end
+	
+	function newsvendor(capacity::Int, fix_order_cost::Int = 0)
+		start_time = time()
+		# pmf = getPMFPoisson(
+		# 	demands,
+		# 	truncQuantile,
+		# )
+		pmf = getPMFSelf(values, probs)
+	
+		holdBackorderCost = zeros(Float64, num_inv)
+		for inventory in minI:maxI
+			idx = inventory - minI + 1
+			if inventory > 0
+				holdBackorderCost[idx] =
+					hold_cost * inventory
+			elseif inventory < 0
+				holdBackorderCost[idx] =
+					-penalty_cost * inventory
+			end
+		end
+	
+		value = zeros(Float64, T + 1, num_inv)
+		policy = zeros(Int, T, num_inv)
+		valueG = zeros(Float64, T + 1, num_inv)
+	
+		#################################################
+		# backward DP
+		#################################################
+	
+		for t in T:-1:1
+			for inventory in minI:maxI
+				bestValue = Inf
+				bestValueG = Inf
+				bestAction = 0
+	
+				for action in 0:capacity
+					fixCost = action > 0 ? fix_order_cost : 0.0
+					variCost = action * unit_order_cost
+					if t == 1
+						fixCostG = 0.0
+						variCostG = inventory * unit_order_cost
+					end
+					expectedCost = 0.0
+					expectedCostG = 0.0
+	
+					for dp in pmf[t]
+						demand = dp.demand
+						prob = dp.prob
+						nextInventory = clamp(
+							inventory + action - demand,
+							minI,
+							maxI,
+						)
+						if t == 1
+							nextInventoryG = clamp(
+								inventory - demand,
+								minI,
+								maxI,
+							)
+						end
+	
+						immediateCost =
+							fixCost +
+							variCost +
+							holdBackorderCost[nextInventory-minI+1]
+						if t == 1
+							immediateCostG =
+								fixCostG +
+								variCostG +
+								holdBackorderCost[nextInventoryG-minI+1]
+						end
+	
+						idx_next = nextInventory - minI + 1
+						futureCost =
+							value[t+1, idx_next]
+						expectedCost +=
+							prob * (immediateCost + futureCost)
+						if t == 1
+							idx_nextG = nextInventoryG - minI + 1
+							futureCostG =
+								value[t+1, idx_nextG]
+							expectedCostG +=
+								prob * (immediateCostG + futureCostG)
+						end
+					end
+	
+					if expectedCost < bestValue
+						bestValue = expectedCost
+						bestAction = action
+					end
+					if t == 1
+						if expectedCostG < bestValueG
+							bestValueG = expectedCostG
+						end
+					end
+				end
+	
+				idx = inventory - minI + 1
+				value[t, idx] = bestValue
+				policy[t, idx] = bestAction
+				if t == 1
+					valueG[t, idx] = bestValueG
+				else
+					valueG[t, idx] = bestValue
+				end
+			end
+		end
+	
+		elapsed = time() - start_time
+		initialInventory = 0
+		idx0 = initialInventory - minI + 1
+		optimalValue = value[1, idx0]
+	
+		# println("planning horizon = $T")
+		# println("running time = $elapsed seconds")
+		# println("optimal value = $optimalValue")
+		# println(
+		# 	"optimal Q at t=1, inventory=0 is: ",
+		# 	policy[1, idx0],
+		# )
+	
+		Cs = value[1, :]
+		Qs = policy[1, :]
+		Gs = valueG[1, :]
+		return Cs, Qs, Gs
+	end
 end
 
-# ╔═╡ 86ec7171-f67f-4479-9ec9-e4d1747047d6
-# 这种方式可以让用户点击数值后直接输入，或左右微调
-@bind capacity Slider(10:200, default=100, show_value=true)
-
-# ╔═╡ 4b9932d8-cb41-42b7-9944-6529028ee252
+# ╔═╡ 840853f6-c2fc-4fdd-a22d-88b6e527c396
 begin
-	I, G = compute_G(capacity)
-	plot(I, G,
-		xlabel = "Inventory",
-		label = L"G(y)",
-		lw = 2)
+    using PlutoUI
+    using Plots
+end
+
+# ╔═╡ 73974d82-3099-49e3-b885-6593d8ea9315
+begin
+    control = md"""
+    **capacity:**  $(@bind capacity Slider(0:200, default=50, show_value=true))
+    **K**: $(@bind fix_order_cost Slider(0:200, default=0, show_value=true))
+    """
+end
+
+# ╔═╡ edabff63-9508-4d35-beea-2e3204b493bb
+begin
+    Cs, Qs, Gs = newsvendor(capacity, fix_order_cost)
+    p = plot(
+        plot(minI:maxI, Cs, lw=2, linecolor=:blue, label='C'),
+        plot(minI:maxI, Qs, lw=2, color=:green, label='Q'),
+        plot(minI:maxI, Gs, lw=2, color=:red, label='G'), layout=(3,1)
+    )
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Distributions = "~0.25.125"
-LaTeXStrings = "~1.4.0"
 Plots = "~1.41.6"
 PlutoUI = "~0.7.83"
 """
@@ -248,7 +274,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "2da79fb5656b7f9b039b8c200a62890147058065"
+project_hash = "b6854bbc5b9d5bf70b8b0252b2e1d73bdb3f6420"
 
 [[deps.AbstractPlutoDingetjes]]
 git-tree-sha1 = "6c3913f4e9bdf6ba3c08041a446fb1332716cbc2"
@@ -451,10 +477,10 @@ version = "1.16.0"
     Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [[deps.FixedPointNumbers]]
-deps = ["Statistics"]
-git-tree-sha1 = "05882d6995ae5c12bb5f36dd2ed3f61c98cbb172"
+deps = ["Random", "Statistics"]
+git-tree-sha1 = "59af96b98217c6ef4ae0dfe065ac7c20831d1a84"
 uuid = "53c48c17-4a7d-5ca2-90c5-79b7896eea93"
-version = "0.8.5"
+version = "0.8.6"
 
 [[deps.Fontconfig_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Expat_jll", "FreeType2_jll", "JLLWrappers", "Libdl", "Libuuid_jll", "Zlib_jll"]
@@ -487,9 +513,9 @@ version = "3.4.1+1"
 
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Preferences", "Printf", "Qt6Wayland_jll", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "p7zip_jll"]
-git-tree-sha1 = "44716a1a667cb867ee0e9ec8edc31c3e4aa5afdc"
+git-tree-sha1 = "b66084e7246be1a381363a2b75c03fc5d815f599"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.73.24"
+version = "0.73.25"
 
     [deps.GR.extensions]
     IJuliaExt = "IJulia"
@@ -499,9 +525,9 @@ version = "0.73.24"
 
 [[deps.GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "FreeType2_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Qt6Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "be8a1b8065959e24fdc1b51402f39f3b6f0f6653"
+git-tree-sha1 = "c45a7c5b40346c21e66343dded33312e1bab98b6"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.73.24+0"
+version = "0.73.25+0"
 
 [[deps.GettextRuntime_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Libiconv_jll"]
@@ -592,9 +618,9 @@ version = "1.8.0"
 
 [[deps.JSON]]
 deps = ["Dates", "Logging", "Parsers", "PrecompileTools", "StructUtils", "UUIDs", "Unicode"]
-git-tree-sha1 = "f76f7560267b840e492180f9899b472f30b88450"
+git-tree-sha1 = "c89d196f5ffb64bfbf80985b699ea913b0d2c211"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "1.6.0"
+version = "1.6.1"
 
     [deps.JSON.extensions]
     JSONArrowExt = ["ArrowTypes"]
@@ -873,9 +899,9 @@ version = "1.57.1+0"
 
 [[deps.Parsers]]
 deps = ["Dates", "PrecompileTools", "UUIDs"]
-git-tree-sha1 = "5d5e0a78e971354b1c7bff0655d11fdc1b0e12c8"
+git-tree-sha1 = "468dbe2b510c876dc091b2c74ed52c7c34f48b9b"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
-version = "2.8.4"
+version = "2.8.5"
 
 [[deps.Pixman_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "LLVMOpenMP_jll", "Libdl"]
@@ -1511,9 +1537,8 @@ version = "1.13.0+0"
 
 # ╔═╡ Cell order:
 # ╠═e6b5bbbf-da7d-4428-815d-636336625518
-# ╠═644d7636-eebc-4b7f-a8c8-6da56d1cb3d5
-# ╠═59afef70-00bc-4642-b12a-34bc68597e85
-# ╠═86ec7171-f67f-4479-9ec9-e4d1747047d6
-# ╠═4b9932d8-cb41-42b7-9944-6529028ee252
+# ╠═840853f6-c2fc-4fdd-a22d-88b6e527c396
+# ╠═edabff63-9508-4d35-beea-2e3204b493bb
+# ╠═73974d82-3099-49e3-b885-6593d8ea9315
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
