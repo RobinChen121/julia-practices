@@ -6,12 +6,13 @@
 
 using Distributions
 
-const T = 10
+const T = 1
 const unit_order_cost = 1.0
 const hold_cost = 2.0
 const penalty_cost = 10.0
 const minI = -100
 const maxI = 100
+const capacity = 150
 
 struct DemandProb
 	demand::Int
@@ -68,23 +69,24 @@ function getPMFSelf(
 end
 
 
-function main(capacity::Int = 100, fix_order_cost::Int = 0)
-    ### poisson demand
-	# mean_demand = 20.0
-	# demands = fill(mean_demand, T)
-    # pmf = getPMFPoisson(
-	# 	demands,
-	# 	truncQuantile,
-	# )
-
-    ### self defined distribution
-    values = collect(10:10:100) # collect 能展开等差数列为数组
-    N = length(values)
-	probs = fill(1/N, N)
-    pmf = getPMFSelf(values, probs)
-
+function main(capacity::Int = capacity, fix_order_cost::Int = 0)
 	# capacity = 150
     truncQuantile = 0.9999
+
+    ## poisson demand
+	mean_demand = 20.0
+	demands = fill(mean_demand, T)
+    pmf = getPMFPoisson(
+		demands,
+		truncQuantile,
+	)
+
+    # ### self defined distribution
+    # values = collect(10:10:100) # collect 能展开等差数列为数组
+    # N = length(values)
+	# probs = fill(1/N, N)
+    # pmf = getPMFSelf(values, probs)
+
 
 	num_inv = maxI - minI + 1
 	start_time = time()
@@ -175,4 +177,4 @@ function main(capacity::Int = 100, fix_order_cost::Int = 0)
 	)
 end
 
-main(50)
+main()
