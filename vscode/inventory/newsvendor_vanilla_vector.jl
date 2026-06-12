@@ -6,7 +6,10 @@
 
 using Distributions
 
-const T = 1
+const mean_demand = 10
+# demands = fill(mean_demand, T)
+demands = [10, 20, 10, 20, 10, 20, 10, 20]
+const T = length(demands)
 const unit_order_cost = 1.0
 const hold_cost = 2.0
 const penalty_cost = 10.0
@@ -20,7 +23,7 @@ struct DemandProb
 end
 
 function getPMFPoisson(
-	demands::Vector{Float64},
+	demands::Vector{Int},
 	truncated_quantile::Float64,
 )
 	T = length(demands)
@@ -74,8 +77,6 @@ function main(capacity::Int = capacity, fix_order_cost::Int = 0)
     truncQuantile = 0.9999
 
     ## poisson demand
-	mean_demand = 20.0
-	demands = fill(mean_demand, T)
     pmf = getPMFPoisson(
 		demands,
 		truncQuantile,
@@ -169,7 +170,7 @@ function main(capacity::Int = capacity, fix_order_cost::Int = 0)
 	optimalValue = value[1, idx0]
 
 	println("planning horizon = $T")
-	println("running time = $elapsed seconds")
+	@printf("running time = .4f% seconds", elapsed)
 	println("optimal value = $optimalValue")
 	println(
 		"optimal order at t=1, inventory=0 is: ",
